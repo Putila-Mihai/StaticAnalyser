@@ -26,7 +26,6 @@ def run_7z_extract(zip_path, out_dir):
         print(f"Failed to extract {zip_path} with 7z.")
         return False
 
-# Step 1: Query Mirai samples
 response = requests.post(
     "https://mb-api.abuse.ch/api/v1/",
     headers={"API-KEY": API_KEY},

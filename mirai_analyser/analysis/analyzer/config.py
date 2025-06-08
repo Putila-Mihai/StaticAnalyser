@@ -50,3 +50,26 @@ SUSPICIOUS_ENTROPY_THRESHOLD = 4.5
 MAX_REPETITION_RATIO = 0.7 
 MIN_REPORT_SCORE_THRESHOLD = 0.6
 MAX_LENGHT_SCAN = 90
+
+# Function Prologue Patterns for identifying function entry points
+#   - First element: List of expected mnemonics in sequence.
+#   - Second element: List of expected substrings in op_str for corresponding mnemonics.
+# This is a heuristic and requires refinement based on sample analysis.
+PROLOGUE_PATTERNS = {
+    'ARM': [
+        # PUSH {..., LR} followed by SUB SP, SP, #imm
+        # Example: PUSH {R4, LR}, SUB SP, SP, #0xNN
+        (['push', 'sub'], ['lr', 'sp']),
+        # STMDB SP!, {regs} followed by SUB SP, SP, #imm (STMDB is the actual instruction for PUSH)
+        # Example: STMD SP!, {R4, LR}, SUB SP, SP, #0xNN
+        (['stm', 'sub'], ['!', 'sp']), # Using 'stm' for startswith 'stm' (stmdb, stmfd, etc.)
+
+    ],
+    'MIPS': [
+        # ADDIU $sp, $sp, -imm followed by SW $ra, imm($sp)
+        # Example: ADDIU SP,SP,-imm; SW RA,imm(SP)
+        (['addiu', 'sw'], ['sp', 'ra']),
+        # ADDIU $sp, $sp, -imm followed by SW $s0, imm($sp) (sometimes $ra is saved later)
+        (['addiu', 'sw'], ['sp', 's']),
+    ]
+}
