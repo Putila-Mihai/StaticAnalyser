@@ -1,5 +1,6 @@
 MIN_STRING_LENGTH = 4
 MIRAI_XOR_KEY = 0x37
+
 MIRAI_KEYWORDS = {
     # Core functionality
     "mirai", "botnet", "c2", "command", "infect",
@@ -21,23 +22,31 @@ MIRAI_KEYWORDS = {
     "arm", "mips", "x86", "sh4", "ppc",
     "router", "camera", "dvr", "iot"
 }
+
 XOR_KEYS = [0x37, 0x13, 0x55, 0xFF, 0x01, 0x29, 0x42]
+
 FUZZY_PATTERNS = {
-        r'm[1i!]r[4a]i',       # m1r4i, mirai
-        r'sc[4a]n',            # sc4n, scan
-        r'r[0o]0t',            # r00t, root
-        r'[5s]yn[-_]flood',    # SYN_FLOOD, syn-flood
-        r'/[e3]tc/rc\.',       # /etc/rc., /3tc/rc.
-    }
+    r'm[1i!]r[4a]i',       # m1r4i, mirai
+    r'sc[4a]n',            # sc4n, scan
+    r'r[0o]0t',            # r00t, root
+    r'[5s]yn[-_]flood',    # SYN_FLOOD, syn-flood
+    r'/[e3]tc/rc\.',       # /etc/rc., /3tc/rc.
+}
+
 STRUCTURAL_CHECKS = [
-        # IP addresses (obfuscated or plain)
-        r'\b\d{1,3}[\.\-_]\d{1,3}[\.\-_]\d{1,3}[\.\-_]\d{1,3}\b',
-        # Common paths (e.g., /dev/random, /tmp/)
-        r'/(dev|tmp|etc|var|proc)/[a-z0-9_\-\.]+',
-        # Hex-like sequences (e.g., payloads)
-        r'[0-9a-f]{8,}',
-        # Common delimiters (:, |, \x13, etc.)
-        r'[:|>\x13]',
-    ]
+    r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?::\d+)?\b',  # IP:port
+    r'/etc/rc\.local',
+    r'/dev/[a-z0-9]+',
+    r'xc3511', 'vizxv',  # Common passwords
+    r'[a-f0-9]{8,}',     # Hex strings
+    r'SYN_?FLOOD',
+    r'UDP_?FLOOD',
+    r'TCP_?FLOOD'
+]
+
 MIN_ALPHA_NUM_RATIO = 0.3
+MIN_ALPHA_NUM_RATIO_XOR_PLAUSIBLE = 0.4
 SUSPICIOUS_ENTROPY_THRESHOLD = 4.5
+MAX_REPETITION_RATIO = 0.7 
+MIN_REPORT_SCORE_THRESHOLD = 0.6
+MAX_LENGHT_SCAN = 90
