@@ -1,4 +1,4 @@
-import os # Added for path handling
+import os
 import graphviz
 from capstone import Cs, CS_ARCH_ARM, CS_ARCH_MIPS, \
                      CS_MODE_ARM, CS_MODE_THUMB, CS_MODE_MIPS32, CS_MODE_LITTLE_ENDIAN, CS_MODE_BIG_ENDIAN, \
@@ -131,7 +131,6 @@ class CodeAnalyzer:
         if not self.instructions:
             print("Warning: No disassembled instructions. Cannot find functions.")
             return
-
         # 1. Always add the ELF entry point
         if self.elf_info.entry_point is not None:
             entry_point_addr = self.elf_info.entry_point
@@ -160,8 +159,8 @@ class CodeAnalyzer:
         if not symbol_analyzer_result.get('is_stripped', True) or symbol_analyzer_result.get('function_map'):
             # print("Using symbol table information to find functions...")
             self._find_functions_from_symbols(symbol_analyzer_result['function_map'])
-        # else:
-            # print("Binary is stripped/no symbols. Relying on code heuristics...")
+        else:
+            print("Binary is stripped/no symbols. Relying on code heuristics...")
 
         # 3. Find functions from call targets (applicable to both stripped and unstripped)
         self._find_functions_from_call_targets()
@@ -173,24 +172,36 @@ class CodeAnalyzer:
         # print(f"Finished function identification. Found {len(self.functions)} functions.")
 
     def _find_functions_from_symbols(self, symbol_function_map: Dict[int, Dict[str, Any]]) -> None:
-        """Helper to add functions identified by SymbolAnalyzer."""
+        """Helper to add functions identified by SymbolAnalyzer or update existing ones with symbol info."""
         for addr, sym_details in symbol_function_map.items():
             if addr not in self.functions:
+                # If the function is not yet known, create it directly from symbol info
                 func = Function(
                     start_address=addr,
                     name=sym_details.get('name'),
-                    func_type=sym_details.get('type', 'symbol')
+                    func_type=sym_details.get('type', 'symbol') # Default to 'symbol' type
                 )
                 func.tags.extend(sym_details.get('tags', []))
                 self.functions[addr] = func
             else:
+                # If the function already exists (e.g., discovered as entry point or call target)
                 existing_func = self.functions[addr]
-                if not existing_func.name.startswith("sub_") and sym_details.get('name'):
-                    existing_func.name = sym_details['name']
-                if existing_func.func_type == 'unknown' or (existing_func.func_type == 'imported' and sym_details.get('type') == 'local'):
-                    existing_func.func_type = sym_details['type']
+                
+                sym_name = sym_details.get('name')
+                if sym_name:
+                    # Always prioritize a valid symbol name over generic 'sub_0x...' or 'ELF_Entry'
+                    if existing_func.name.startswith("sub_") or existing_func.name == "ELF_Entry":
+                        existing_func.name = sym_name
+                    # Optionally, if the existing name is less descriptive or the type is less authoritative, update it.
+                    # Example: if existing_func.func_type is 'discovered_call' but symbol says 'local'
+                    if existing_func.func_type in ['unknown', 'discovered_call', 'discovered_prologue']:
+                        existing_func.func_type = sym_details.get('type', 'symbol')
+                    # If an imported function later gets a more specific local symbol (less common but possible)
+                    elif existing_func.func_type == 'imported' and sym_details.get('type') == 'local':
+                        existing_func.func_type = sym_details['type']
+
                 existing_func.tags.extend(sym_details.get('tags', []))
-                existing_func.tags = list(set(existing_func.tags))
+                existing_func.tags = list(set(existing_func.tags)) # Deduplicate tags
 
 
     def _find_functions_from_call_targets(self) -> None:
@@ -569,242 +580,215 @@ class CodeAnalyzer:
 
             # print(f"  CFG built for function {func.name} (0x{func.start_address:x}): {len(func.basic_blocks)} basic blocks.")
 
-    def print_analysis_summary(self):
+    # --- New get_report method for text summary ---
+    def get_report(self) -> str:
         """
-        Prints a comprehensive summary of the analysis, including
-        disassembly info, identified functions, intra-procedural CFGs,
-        and an inter-procedural call graph.
+        Generates a formatted string report of the code analysis,
+        including disassembly info, identified functions, and call graph summary.
+        Assumes disassemble_code(), find_functions(), and build_control_flow_graphs()
+        have already been called successfully.
         """
-        print("\n" + "="*80)
-        print(f"      ANALYSIS REPORT")
-        print("="*80)
+        report_lines = []
+        report_lines.append("="*80)
+        report_lines.append("CODE ANALYSIS REPORT")
+        report_lines.append("="*80)
 
-        # --- Section 1: Disassembly Summary ---
-        print("\n" + "-"*30 + " Disassembly Summary " + "-"*29)
-        print(f"Architecture: {self.elf_info.machine_arch} ({'Little-Endian' if self.elf_info.data_encoding else 'Big-Endian'})")
-        print(f"Entry Point: {hex(self.elf_info.entry_point) if self.elf_info.entry_point else 'N/A'}")
-        print(f"Total Disassembled Instructions: {len(self.instructions)}")
-        print("-" * 80)
+        # --- Disassembly Summary ---
+        report_lines.append("\n--- Disassembly Summary ---")
+        if self.text_section_data_info:
+            report_lines.append(f"  .text Section VAddr: 0x{self.text_section_data_info['addr']:x}")
+            report_lines.append(f"  .text Section Size:  0x{self.text_section_data_info['size']:x} bytes")
+        report_lines.append(f"  Total Disassembled Instructions: {len(self.instructions)}")
 
-        # --- Section 2: Identified Functions ---
-        print("\n" + "-"*30 + " Identified Functions " + "-"*29)
-        if self.functions:
+        # --- Function Summary ---
+        report_lines.append("\n--- Function Summary ---")
+        report_lines.append(f"  Total Functions Identified: {len(self.functions)}")
+        
+        func_types_count = {}
+        for func in self.functions.values():
+            func_types_count[func.func_type] = func_types_count.get(func.func_type, 0) + 1
+        
+        report_lines.append("  Functions by Type:")
+        for func_type, count in sorted(func_types_count.items()):
+            report_lines.append(f"    - {func_type.replace('_', ' ').title()}: {count}")
+
+        # --- Detailed Function List (Condensed) ---
+        report_lines.append("\n--- Detailed Function List ---")
+        if not self.functions:
+            report_lines.append("  No functions to display.")
+        else:
+            report_lines.append(f"{'Address':<10} {'Name':<35} {'Type':<15} {'Tags':<20} {'BBs':<5} {'Calls':<6} {'XRefs':<6}")
+            report_lines.append(f"{'-'*10} {'-'*35} {'-'*15} {'-'*20} {'-'*5} {'-'*6} {'-'*6}")
+            
             sorted_functions = sorted(self.functions.values(), key=lambda f: f.start_address)
             for func in sorted_functions:
-                num_bbs = len(func.basic_blocks) if func.basic_blocks else 0
-                tags_str = f" (Tags: {', '.join(func.tags)})" if func.tags else ""
-                print(f"  0x{func.start_address:x}: {func.name} (Type: {func.func_type}, BBs: {num_bbs}){tags_str}")
-        else:
-            print("  No functions were identified.")
-        print("-" * 80)
+                tags_str = ', '.join(func.tags) if func.tags else 'None'
+                report_lines.append(
+                    f"0x{func.start_address:08x} {func.name:<35} {func.func_type:<15} {tags_str:<20} "
+                    f"{len(func.basic_blocks):<5} {len(func.called_functions):<6} {len(func.xrefs_from):<6}"
+                )
 
-        # --- Section 3: Intra-Procedural CFG Details (per Function) ---
-        print("\n" + "-"*20 + " Intra-Procedural CFG Details (per Function) " + "-"*20)
-        if self.functions:
-            sorted_functions_with_cfg = sorted(self.functions.values(), key=lambda f: f.start_address)
-            for func in sorted_functions_with_cfg:
+        # --- Inter-procedural Call Graph Summary ---
+        report_lines.append("\n--- Call Graph Summary ---")
+        functions_with_calls = sorted([f for f in self.functions.values() if f.called_functions], key=lambda f: len(f.called_functions), reverse=True)
+        functions_with_xrefs = sorted([f for f in self.functions.values() if f.xrefs_from], key=lambda f: len(f.xrefs_from), reverse=True)
+
+        if functions_with_calls:
+            report_lines.append("  Top 5 Functions Making Calls:")
+            for i, func in enumerate(functions_with_calls[:5]):
+                report_lines.append(f"    {i+1}. {func.name} (0x{func.start_address:x}) calls {len(func.called_functions)} others.")
+        else:
+            report_lines.append("  No functions observed making calls.")
+
+        if functions_with_xrefs:
+            report_lines.append("  Top 5 Functions Being Called/Referenced:")
+            for i, func in enumerate(functions_with_xrefs[:5]):
+                report_lines.append(f"    {i+1}. {func.name} (0x{func.start_address:x}) has {len(func.xrefs_from)} cross-references.")
+        else:
+            report_lines.append("  No functions observed being called/referenced.")
+
+        report_lines.append("\n" + "="*80)
+        return "\n".join(report_lines)
+
+    def get_visualization(self, output_dir: str = "visualizations", 
+                            base_name: Optional[str] = None,
+                            generate_cfgs: bool = True,
+                            cfg_filter_mirai_tags: bool = True,
+                            cfg_filter_entry_point: bool = True,
+                            cfg_filter_min_xrefs: int = 5, # Generate CFG for functions with >= 5 xrefs
+                            cfg_filter_min_calls_made: int = 5, # Generate CFG for functions calling >= 5 others
+                            cfg_max_count: int = 15 # Max number of CFGs to generate if filters result in many
+                            ) -> List[str]:
+        if not self.functions:
+            print("Warning: No functions identified. Skipping visualization generation.")
+            return []
+        os.makedirs(output_dir, exist_ok=True)
+        generated_files = []
+        
+        if base_name is None:
+            base_name = os.path.basename(self.elf_info.file_path).replace('.', '_') + "_analysis"
+        
+        print(f"[*] Generating visualizations to '{output_dir}'...")
+
+        # 1. Generate Global Call Graph (always generate this one)
+        print("  - Generating Global Call Graph...")
+        call_graph = graphviz.Digraph(comment='Global Call Graph', format='png')
+        call_graph.attr(rankdir='LR', size='15,15') # Left-to-Right
+
+        # Nodes for functions
+        for func_addr, func in self.functions.items():
+            label = f"{func.name}\n(0x{func.start_address:x})"
+            color = 'lightgray'
+            if func.func_type == 'imported':
+                color = 'lightgoldenrod'
+            elif func.func_type == 'local':
+                color = 'lightblue'
+            elif func.func_type == 'ELF_Entry':
+                color = 'greenyellow'
+
+            if func.tags:
+                label += f"\nTags: {', '.join(func.tags)}"
+
+            call_graph.node(f'Func_{func_addr:x}', label=label, shape='box', style='filled', fillcolor=color)
+
+        # Edges for calls
+        for func_addr, func in self.functions.items():
+            for called_func_addr in func.called_functions:
+                if called_func_addr in self.functions: 
+                    call_graph.edge(f'Func_{func_addr:x}', f'Func_{called_func_addr:x}')
+                pass 
+
+        try:
+            output_path_base = os.path.join(output_dir, f"{base_name}_call_graph")
+            dot_file = call_graph.render(output_path_base, view=False, cleanup=True)
+            generated_files.append(dot_file)
+            print(f"  Generated Call Graph: {dot_file}")
+        except Exception as e:
+            print(f"  Error generating Call Graph: {e}")
+
+        # 2. Generate Individual Function CFGs (based on filters)
+        if generate_cfgs:
+            print("  - Generating Control Flow Graphs for selected functions...")
+            
+            # Identify functions for CFG generation based on criteria
+            cfgs_to_generate = set()
+
+            # Criterion 1: Mirai-tagged functions
+            if cfg_filter_mirai_tags:
+                for func_addr, func in self.functions.items():
+                    if any('mirai' in tag.lower() for tag in func.tags): # Check if any tag contains 'mirai'
+                        cfgs_to_generate.add(func_addr)
+            
+            # Criterion 2: ELF Entry Point
+            if cfg_filter_entry_point and self.elf_info.entry_point in self.functions:
+                cfgs_to_generate.add(self.elf_info.entry_point)
+
+            # Criterion 3 & 4: Functions with many xrefs or calls (prioritize more relevant ones first)
+            # We'll build a sorted list and add them until max_count is reached
+            candidate_funcs = sorted(self.functions.values(), key=lambda f: (len(f.xrefs_from) + len(f.called_functions)), reverse=True)
+            
+            for func in candidate_funcs:
+                if func.start_address in cfgs_to_generate: # Already added
+                    continue
+                if len(func.xrefs_from) >= cfg_filter_min_xrefs or \
+                   len(func.called_functions) >= cfg_filter_min_calls_made:
+                    cfgs_to_generate.add(func.start_address)
+                
+                if len(cfgs_to_generate) >= cfg_max_count:
+                    break # Stop adding if we hit the limit
+
+            # Now, actually generate the CFGs for the selected functions
+            generated_cfg_count = 0
+            for func_addr in cfgs_to_generate:
+                if generated_cfg_count >= cfg_max_count:
+                    print(f"    Max CFG count ({cfg_max_count}) reached. Skipping remaining.")
+                    break
+
+                func = self.functions[func_addr]
                 if not func.basic_blocks:
-                    print(f"\nFunction: {func.name} (0x{func.start_address:x}) - No basic blocks found.")
+                    # print(f"    Skipping CFG for {func.name} (0x{func_addr:x}): No basic blocks.")
                     continue
 
-                print(f"\nFunction: {func.name} (0x{func.start_address:x})")
-                print(f"  Entry Block: {hex(func.entry_block_address) if func.entry_block_address else 'N/A'}")
-                print(f"  End Address: {hex(func.end_address) if func.end_address else 'N/A'}")
-                print(f"  Total Basic Blocks: {len(func.basic_blocks)}")
-
-                sorted_bbs = sorted(func.basic_blocks.values(), key=lambda bb: bb.start_address)
-                for bb in sorted_bbs:
-                    entry_exit_flags = []
-                    if bb.is_entry_block: entry_exit_flags.append("ENTRY")
-                    if bb.is_exit_block: entry_exit_flags.append("EXIT")
-                    flags_str = f" ({', '.join(entry_exit_flags)})" if entry_exit_flags else ""
-
-                    succ_addrs = [hex(s) for s in sorted(list(bb.successors))]
-                    pred_addrs = [hex(p) for p in sorted(list(bb.predecessors))]
+                dot = graphviz.Digraph(comment=f'CFG for {func.name}', format='png')
+                dot.attr(rankdir='TB', size='15,10') 
+                
+                for bb_addr, bb in func.basic_blocks.items():
+                    label_lines = []
+                    label_lines.append(f"BB: 0x{bb.start_address:x}")
                     
-                    bb_end_display = hex(bb.end_address) if bb.end_address is not None else 'N/A'
+                    for i, insn in enumerate(bb.instructions):
+                        if i >= 5 and len(bb.instructions) > 5: 
+                            label_lines.append("...")
+                            break
+                        label_lines.append(f"  0x{insn.address:x}: {insn.mnemonic} {insn.op_str}")
 
-                    print(f"    BB 0x{bb.start_address:x}-0x{bb_end_display} ({len(bb.instructions)} insns){flags_str}")
-                    print(f"      Terminator Type: {bb.terminator_type}")
-                    print(f"      Successors: [{', '.join(succ_addrs) if succ_addrs else 'None'}]")
-                    print(f"      Predecessors: [{', '.join(pred_addrs) if pred_addrs else 'None'}]")
+                    color = 'lightblue'
+                    if bb.is_entry_block:
+                        color = 'greenyellow'
+                    elif bb.is_exit_block:
+                        color = 'salmon'
                     
-                    # Optional: Print instructions within each basic block
-                    # for insn in bb.instructions:
-                    #     print(f"        0x{insn.address:x}:\t{insn.mnemonic}\t{insn.op_str}")
-        else:
-            print("  No functions found to display CFG for.")
-        print("-" * 80)
+                    dot.node(f'BB_{bb_addr:x}', label='\n'.join(label_lines), shape='box', style='filled', fillcolor=color)
 
-        # --- Section 4: Inter-Procedural Call Graph ---
-        print("\n" + "-"*29 + " Inter-Procedural Call Graph " + "-"*28)
-        call_graph_summary = {} # caller_name -> [callee_name]
-        
-        # Populate call_graph_summary for functions that call others
-        if self.functions:
-            for func_addr, func in self.functions.items():
-                if func.called_functions:
-                    caller_name = func.name
-                    call_graph_summary[caller_name] = []
-                    for target_addr in sorted(list(func.called_functions)): # Sort for consistent output
-                        target_func = self.functions.get(target_addr)
-                        target_name = target_func.name if target_func else f"unresolved_0x{target_addr:x}"
-                        call_graph_summary[caller_name].append(target_name)
-
-            if call_graph_summary:
-                print("\nFunctions Calling Others:")
-                for caller_name in sorted(call_graph_summary.keys()): # Sort callers
-                    callees = sorted(call_graph_summary[caller_name]) # Sort callees
-                    print(f"  {caller_name} -> {', '.join(callees)}")
+                for bb_addr, bb in func.basic_blocks.items():
+                    for succ_addr in bb.successors:
+                        if succ_addr in func.basic_blocks: 
+                            dot.edge(f'BB_{bb_addr:x}', f'BB_{succ_addr:x}')
+                
+                try:
+                    output_path_base = os.path.join(output_dir, f"{base_name}_cfg_0x{func_addr:x}_{func.name.replace(':', '_')}")
+                    dot_file = dot.render(output_path_base, view=False, cleanup=True)
+                    generated_files.append(dot_file)
+                    generated_cfg_count += 1
+                    # print(f"    Generated CFG: {dot_file}")
+                except Exception as e:
+                    print(f"    Error generating CFG for {func.name} (0x{func_addr:x}): {e}")
+            
+            if generated_cfg_count > 0:
+                print(f"  Generated {generated_cfg_count} selected CFG(s).")
             else:
-                print("  No function calls identified (Call Graph is empty).")
-            
-            print("\nFunctions Called By Others (Xrefs-To):")
-            # Create a map for quick lookup of function names by address
-            addr_to_name = {addr: func.name for addr, func in self.functions.items()}
-
-            xrefs_to_summary = {} # callee_name -> [caller_name]
-            for func_addr, func in self.functions.items():
-                if func.xrefs_from:
-                    callee_name = func.name
-                    xrefs_to_summary[callee_name] = []
-                    for caller_addr in sorted(list(func.xrefs_from)): # Sort for consistent output
-                        caller_name = addr_to_name.get(caller_addr, f"unresolved_0x{caller_addr:x}")
-                        xrefs_to_summary[callee_name].append(caller_name)
-            
-            if xrefs_to_summary:
-                for callee_name in sorted(xrefs_to_summary.keys()): # Sort callees
-                    callers = sorted(xrefs_to_summary[callee_name]) # Sort callers
-                    print(f"  {callee_name} <- {', '.join(callers)}")
-            else:
-                print("  No explicit cross-references (xrefs-from) to functions found.")
-        else:
-            print("  No functions to build call graph from.")
-        print("-" * 80)
-
-        print("\n" + "="*80)
-        print("                  ANALYSIS END")
-        print("="*80 + "\n")
-    
-    def visualize_cfg(self, func_address: int, output_filename: str = "cfg_graph.gv") -> Optional[str]:
-        """
-        Generates a Graphviz DOT representation and renders an image for a single function's CFG.
-        Args:
-            func_address: The start address of the function to visualize.
-            output_filename: The base name for the DOT file and the rendered image (e.g., 'my_func_cfg').
-        Returns:
-            The path to the rendered image file, or None if the function is not found.
-        """
-        func = self.functions.get(func_address)
-        if not func:
-            print(f"Error: Function 0x{func_address:x} not found for CFG visualization.")
-            return None
-        if not func.basic_blocks:
-            print(f"Warning: Function 0x{func_address:x} ({func.name}) has no basic blocks to visualize.")
-            return None
-
-        dot = graphviz.Digraph(comment=f'CFG of {func.name}', format='png', graph_attr={'rankdir': 'TB'}) # TB = Top to Bottom
-
-        # Add nodes (Basic Blocks)
-        for bb_addr, bb in func.basic_blocks.items():
-            label = f"BB_0x{bb.start_address:x}"
-            if bb.end_address:
-                label += f"-0x{bb.end_address:x}"
-            label += f" ({len(bb.instructions)} insns)\n"
-            
-            # Add first few instructions to the label for context
-            for i, insn in enumerate(bb.instructions):
-                if i >= 5: # Limit to first 5 instructions
-                    label += "...\n"
-                    break
-                label += f"0x{insn.address:x}: {insn.mnemonic} {insn.op_str}\n"
-
-            shape = 'box'
-            style = ''
-            fillcolor = 'lightblue'
-            if bb.is_entry_block:
-                fillcolor = 'lightgreen'
-            if bb.is_exit_block:
-                fillcolor = 'lightcoral'
-            
-            dot.node(f'0x{bb.start_address:x}', label=label, shape=shape, style='filled', fillcolor=fillcolor, fontname='monospace')
-
-        # Add edges (Control Flow)
-        for bb_addr, bb in func.basic_blocks.items():
-            for succ_addr in bb.successors:
-                if succ_addr in func.basic_blocks: # Ensure successor is a valid BB within this function
-                    # Determine edge color/style (e.g., red for conditional false, blue for true, black for unconditional)
-                    edge_color = 'black'
-                    if bb.terminator_type == 'jump_conditional':
-                        # This logic is simplistic, true/false branches need more analysis
-                        # For now, just mark all conditional branches a different color
-                        if succ_addr == (bb.instructions[-1].address + bb.instructions[-1].size): # Fall-through
-                            edge_color = 'blue'
-                        else: # Jump target
-                            edge_color = 'red'
-
-                    dot.edge(f'0x{bb.start_address:x}', f'0x{succ_addr:x}', color=edge_color)
-                else:
-                    # Handle cases where a successor is outside the analyzed function boundary but within text section.
-                    # This might indicate an indirect jump to another function, or end of function with fall-through
-                    pass # Not drawing external edges in intra-CFG
-
-        try:
-            # Render the graph
-            output_path = dot.render(output_filename, view=False, cleanup=True)
-            print(f"CFG for {func.name} saved to: {output_path}")
-            return output_path
-        except Exception as e:
-            print(f"Error rendering CFG for {func.name}: {e}")
-            print("Please ensure Graphviz system executable is installed and in your PATH.")
-            return None
-
-    def visualize_call_graph(self, output_filename: str = "call_graph.gv") -> Optional[str]:
-        """
-        Generates a Graphviz DOT representation and renders an image for the inter-procedural call graph.
-        Args:
-            output_filename: The base name for the DOT file and the rendered image (e.g., 'program_call_graph').
-        Returns:
-            The path to the rendered image file, or None if an error occurs.
-        """
-        dot = graphviz.Digraph(comment='Program Call Graph', format='png', graph_attr={'rankdir': 'LR'}) # LR = Left to Right
-
-        # Create nodes for all identified functions
-        for func_addr, func in self.functions.items():
-            shape = 'box'
-            style = 'filled'
-            fillcolor = 'white'
-            
-            if func.func_type == 'ELF_Entry':
-                fillcolor = 'lightgreen'
-            elif func.func_type == 'imported':
-                fillcolor = 'lightblue'
-            elif func.func_type == 'discovered_prologue':
-                fillcolor = 'lightgray'
-            
-            label = f"{func.name}\n0x{func.start_address:x}"
-            dot.node(f'0x{func.start_address:x}', label=label, shape=shape, style=style, fillcolor=fillcolor)
-
-        # Add edges based on called_functions
-        for func_addr, func in self.functions.items():
-            for called_addr in func.called_functions:
-                # Only draw edges to functions we know about (i.e., within self.functions)
-                # Unresolved external calls might be represented differently if needed
-                if called_addr in self.functions:
-                    dot.edge(f'0x{func.start_address:x}', f'0x{called_addr:x}')
-                else:
-                    # Optionally, add external nodes for unresolved calls
-                    unresolved_name = f"external_0x{called_addr:x}"
-                    if unresolved_name not in dot.source: # Avoid duplicate node definitions
-                        dot.node(unresolved_name, label=f"External: {hex(called_addr)}", shape='note', color='red', fontcolor='red')
-                    dot.edge(f'0x{func.start_address:x}', unresolved_name, color='red', style='dashed')
+                print("  No CFGs generated based on the current filters.")
 
 
-        try:
-            output_path = dot.render(output_filename, view=False, cleanup=True)
-            print(f"Call Graph saved to: {output_path}")
-            return output_path
-        except Exception as e:
-            print(f"Error rendering Call Graph: {e}")
-            print("Please ensure Graphviz system executable is installed and in your PATH.")
-            return None
+        print(f"[*] Visualization generation complete. Total files: {len(generated_files)}")
+        return generated_files

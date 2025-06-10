@@ -273,44 +273,6 @@ class StringAnalyzer:
             
         return sorted(final_results, key=lambda x: -self._score_string_quality(x[1])) 
     
-    def print_report(self) -> None:
-        """Enhanced reporting of extracted strings."""
-        print("\n=== ASCII Strings ===")
-        for section, strings in self.extracted_strings.items():
-            print(f"\n[{section}]")
-            if not strings:
-                print("  - No ASCII strings found.")
-                continue
-            for s in strings:
-                # Decide if you want a [MIRAI] tag for *all* ASCII strings, or only for decrypted/suspicious ones
-                # For direct ASCII, it's often better to just list them unless they are *very* strong indicators.
-                # I'm removing the tag here as it can be noisy for general ASCII.
-                print(f"  - {s}") 
-
-        print("\n=== XOR-Decrypted Strings ===")
-        for section, strings in self.xor_decrypted_strings.items():
-            print(f"\n[{section}]")
-            if not strings:
-                print("  - No XOR-decrypted strings found.")
-                continue
-            for enc_hex, dec_str, key in strings:
-                mirai_tag = "[MIRAI] " if self._is_mirai_string(dec_str) else ""
-                print(f"  - [XOR 0x{key:02x}] {mirai_tag}{dec_str} (Encrypted: {enc_hex})")
-
-        print("\n=== Suspicious High-Entropy Strings ===")
-        for section, strings in self.suspicious_strings.items():
-            print(f"\n[{section}]")
-            if not strings:
-                print("  - No suspicious high-entropy strings found.")
-                continue
-            for s_hex, entropy in strings:
-                decryption_attempt = self._try_decrypt_suspicious(s_hex)
-                if decryption_attempt:
-                    mirai_tag = "[MIRAI] " if self._is_mirai_string(decryption_attempt[1]) else ""
-                    print(f"  - [DECRYPTED] {s_hex} -> {mirai_tag}{decryption_attempt[1]} (Method: {decryption_attempt[2]}, Entropy: {entropy:.2f})")
-                else:
-                    print(f"  - [RAW] {s_hex} (Entropy: {entropy:.2f})")
-    
     def _try_decrypt_suspicious(self, s_hex: str) -> Optional[Tuple[str, str, str]]:
         s_bytes = bytes.fromhex(s_hex) # Convert hex string back to bytes
         
@@ -353,3 +315,69 @@ class StringAnalyzer:
                     continue
         
         return None
+    
+    def get_report(self) -> str:
+        """
+        Generates a formatted string report of the string analysis.
+        Assumes analyze_strings() has already been called successfully.
+        """
+        report_lines = []
+        report_lines.append("="*80)
+        report_lines.append("STRING ANALYSIS REPORT")
+        report_lines.append("="*80)
+
+        # --- Summary of String Counts ---
+        total_ascii = sum(len(s) for s in self.extracted_strings.values())
+        total_xor = sum(len(s) for s in self.xor_decrypted_strings.values())
+        total_suspicious = sum(len(s) for s in self.suspicious_strings.values())
+
+        report_lines.append("\n--- String Analysis Summary ---")
+        report_lines.append(f"  Total ASCII Strings Found: {total_ascii}")
+        report_lines.append(f"  Total XOR-Decrypted Strings Found: {total_xor}")
+        report_lines.append(f"  Total High-Entropy Byte Sequences Found: {total_suspicious}")
+
+        # --- ASCII Strings ---
+        report_lines.append("\n--- ASCII Strings ---")
+        found_ascii_in_sections = False
+        for section, strings in self.extracted_strings.items():
+            if strings:
+                found_ascii_in_sections = True
+                report_lines.append(f"\n[{section}]")
+                for s in strings:
+                    report_lines.append(f"  - {s}") 
+        if not found_ascii_in_sections:
+            report_lines.append("  No ASCII strings found in analyzed sections.")
+
+        # --- XOR-Decrypted Strings ---
+        report_lines.append("\n--- XOR-Decrypted Strings ---")
+        found_xor_in_sections = False
+        for section, strings in self.xor_decrypted_strings.items():
+            if strings:
+                found_xor_in_sections = True
+                report_lines.append(f"\n[{section}]")
+                for enc_hex, dec_str, key in strings:
+                    mirai_tag = "[MIRAI] " if self._is_mirai_string(dec_str) else ""
+                    report_lines.append(f"  - [XOR 0x{key:02x}] {mirai_tag}{dec_str} (Encrypted: {enc_hex})")
+        if not found_xor_in_sections:
+            report_lines.append("  No XOR-decrypted strings found.")
+
+        # --- Suspicious High-Entropy Strings ---
+        report_lines.append("\n--- Suspicious High-Entropy Strings ---")
+        found_suspicious_in_sections = False
+        for section, strings in self.suspicious_strings.items():
+            if strings:
+                found_suspicious_in_sections = True
+                report_lines.append(f"\n[{section}]")
+                for s_hex, entropy in strings:
+                    decryption_attempt = self._try_decrypt_suspicious(s_hex)
+                    if decryption_attempt:
+                        mirai_tag = "[MIRAI] " if self._is_mirai_string(decryption_attempt[1]) else ""
+                        report_lines.append(f"  - [DECRYPTED] {s_hex} -> {mirai_tag}{decryption_attempt[1]} (Method: {decryption_attempt[2]}, Entropy: {entropy:.2f})")
+                    else:
+                        report_lines.append(f"  - [RAW] {s_hex} (Entropy: {entropy:.2f})")
+        if not found_suspicious_in_sections:
+            report_lines.append("  No suspicious high-entropy strings found.")
+
+        report_lines.append("\n" + "="*80)
+
+        return "\n".join(report_lines)

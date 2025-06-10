@@ -1,4 +1,5 @@
 pyelftools==0.27
-capstone==4.0.2
+capstone==5.0.6
 pefile==2021.9.3
 requests==2.26.0
+graphviz

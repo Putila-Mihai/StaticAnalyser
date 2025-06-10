@@ -1,0 +1,8 @@
+
+
+--- Visualizations Generated ---
+Visualizations saved to: mirai_analyser/output/malware_viz_out/test_arm
+Generated graph files:
+- mirai_analyser/output/malware_viz_out/test_arm/test_arm_call_graph.png
+- mirai_analyser/output/malware_viz_out/test_arm/test_arm_cfg_0x103f8__start.png
+- mirai_analyser/output/malware_viz_out/test_arm/test_arm_cfg_0x10618_main.png

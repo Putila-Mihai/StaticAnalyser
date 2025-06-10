@@ -1,76 +1,12 @@
 from elftools.elf.sections import SymbolTableSection
 from typing import List, Dict, Any, Optional
-
+from config import SYMBOL_MIRAI_KEYWORDS
 FunctionEntry = Dict[str, Any] # {'name': str, 'address': int, 'type': str, 'tags': List[str]}
 
 class SymbolAnalyzer:
     def __init__(self, elf_info: Any):
         self.elf_info = elf_info
         self.function_map: Dict[int, FunctionEntry] = {} 
-        
-        # Define mirai_keywords as a class instance attribute
-        self.mirai_keywords = {
-            # System Manipulation 
-            "system": [
-                "setuid", "daemonize",          # Privilege escalation
-                "fork", "execve", "popen",      # Process execution
-                "chroot", "unlink",             # Filesystem manipulation
-                "ioctl", "mprotect",            # Memory/device control
-                "reboot", "kill",               # Host control
-            ],
-
-            # Network & C2 Communication 
-            "network": [
-                "socket", "connect", "bind","connect_cnc","cnc", # Raw TCP/UDP
-                "send", "recv", "sendto",                       # Data transmission
-                "gethostbyname", "getaddrinfo","c2_domain",      # DNS resolution
-                "inet_addr", "htons",                           # Network byte ops
-                "http_open", "http_send",                       # HTTP C2 (rare in Mirai)
-                "irc_connect", "irc_send",                      # Legacy IRC C2
-            ],
-
-            # Attack Vectors 
-            "attack": [
-                "attack_init", "attack_start",   # DDoS module loader
-                "attack_tcp", "attack_udp",      # Flood types
-                "attack_syn", "attack_ack",      # TCP flood variants
-                "attack_dns", "attack_http",     # Protocol-specific floods
-                "attack_ongoing", "attack_kill", # Attack control
-                "killer_",
-            ],
-
-            # Propagation/Scanner 
-            "scanner": [
-                "scanner_init", "scanner_kill",  # Propagation control
-                "brute_", "telnet_",             # Brute-force (e.g., "brute_telnet")
-                "ssh_", "ftp_",                  # Protocol scanners
-                "report_working",                # Success callback
-                "table_unlock_val",              # Config decryption
-                "random_ip",
-            ],
-
-            # Anti-Analysis/Evasion 
-            "evasion": [
-                "vmdetect", "sandbox_check",     # Environment checks
-                "ptrace_", "debugger_",          # Anti-debugging
-                "string_decrypt", "xor_",        # String obfuscation
-                "kill_av", "unhide_",            # Defense disruption
-            ],
-
-            # Persistence 
-            "persistence": [
-                "install_init", "install_rc",    # *nix persistence
-                "add_cron", "write_file",        # Cron/file drops
-                "pidfile_create",                # Process tracking
-            ],
-
-            # Utility Functions 
-            "utility": [
-                "util_strlen", "util_memcpy",    # Low-level helpers
-                "rand_next", "rand_init",        # PRNG for IP/port gen
-                "list_add", "list_remove",      # Bot list management
-            ],
-        }
 
     def _tag_function(self, func_name: str, address: int, func_type: str):
         # Initialize function entry if it doesn't exist
@@ -97,7 +33,7 @@ class SymbolAnalyzer:
 
         current_tags = self.function_map[address]['tags']
 
-        for category_name, keywords_list in self.mirai_keywords.items():
+        for category_name, keywords_list in SYMBOL_MIRAI_KEYWORDS.items():
         
             if category_name in current_tags:
                 continue
@@ -169,31 +105,42 @@ class SymbolAnalyzer:
         }
         return result
 
-    def display_analysis_result(self):
-        print("\n--- ELF Symbol Analysis Results ---")
-        print(f"[*] Binary stripped: {self.elf_info.is_stripped}")
+    def get_report(self) -> str:
+        """
+        Generates a formatted string report of the symbol analysis.
+        Assumes analyze_symbols() has already been called successfully.
+        """
+        report_lines = []
+        report_lines.append("="*80)
+        report_lines.append("SYMBOL ANALYSIS REPORT")
+        report_lines.append("="*80)
 
-        print("\n[*] Function Map (Address: Name [Type] (Tags)):")
-        if not self.function_map:
-            print("    No functions found.")
+        analysis_result = self.get_analysis_result() # Get the structured results
+
+        report_lines.append(f"\n--- Binary Stripping Status ---")
+        report_lines.append(f"  Binary stripped: {'Yes' if analysis_result['is_stripped'] else 'No'}")
+
+        report_lines.append(f"\n--- Identified Functions (Symbol Map) ---")
+        if not analysis_result['function_map']:
+            report_lines.append("  No functions found via symbol analysis.")
         else:
-            sorted_functions = sorted(self.function_map.items(), key=lambda item: item[0])
+            report_lines.append(f"{'Address':<10} {'Name':<30} {'Type':<10} {'Tags':<25}")
+            report_lines.append(f"{'-'*10} {'-'*30} {'-'*10} {'-'*25}")
+            sorted_functions = sorted(analysis_result['function_map'].items(), key=lambda item: item[0])
             for address, details in sorted_functions:
-                tags_str = f" ({', '.join(details['tags'])})" if details['tags'] else ""
-                print(f"    0x{address:08x}: {details['name']} [{details['type']}] {tags_str}")
+                tags_str = ', '.join(details['tags']) if details['tags'] else 'None'
+                report_lines.append(f"0x{address:08x}: {details['name']:<30} {details['type']:<10} {tags_str:<25}")
 
-        dangerous_funcs = [
-            f['name'] for f in self.function_map.values() 
-            if any(tag in f['tags'] for tag in ['system', 'attack', 'evasion', 'persistence'])
-        ]
-        if dangerous_funcs:
-            print("\n[*] Potentially Dangerous Functions:")
-            for func_name in sorted(list(set(dangerous_funcs))): 
-                print(f"    - {func_name}")
+        report_lines.append(f"\n--- Function Type Summary ---")
+        report_lines.append(f"  Total Imported Functions: {len(analysis_result['imported_functions'])}")
+        report_lines.append(f"  Total Local Functions: {len(analysis_result['local_functions'])}")
+
+        report_lines.append(f"\n--- Potentially Dangerous Functions (by Keywords) ---")
+        if analysis_result['dangerous_functions']:
+            report_lines.append(f"  {', '.join(analysis_result['dangerous_functions'])}")
         else:
-            print("\n[*] No overtly dangerous functions identified by keywords.")
+            report_lines.append("  No overtly dangerous functions identified by keywords.")
 
-        num_imports = len([f for f in self.function_map.values() if f['type'] == 'imported'])
-        num_locals = len([f for f in self.function_map.values() if f['type'] == 'local'])
-        print(f"\n[*] Total Imported Functions: {num_imports}")
-        print(f"[*] Total Local Functions: {num_locals}")
+        report_lines.append("\n" + "="*80)
+
+        return "\n".join(report_lines)
