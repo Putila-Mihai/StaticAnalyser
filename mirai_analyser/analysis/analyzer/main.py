@@ -3,7 +3,7 @@ from symbol_analyser import SymbolAnalyzer
 from string_analyzer import StringAnalyzer
 from CodeAnalyzer import CodeAnalyzer
 
-parser = ELFParser("/home/mehigh/Documents/licenta/mirai_analyser/samples/test_arm_stripped")
+parser = ELFParser("/home/mehigh/Documents/licenta/mirai_analyser/samples/test_arm")
 elf_info = parser.parse()
 
 if elf_info: 
@@ -20,6 +20,12 @@ if elf_info:
     code_analyzer.disassemble_code()
     code_analyzer.find_functions(symbol_analyzer.function_map)
     print(code_analyzer.functions)
+    code_analyzer.build_control_flow_graphs()
+    for func in code_analyzer.functions:
+
+        print(func)
+        for bb in func.basic_blocks:
+            print(bb)
     
     parser.close()
 else:
