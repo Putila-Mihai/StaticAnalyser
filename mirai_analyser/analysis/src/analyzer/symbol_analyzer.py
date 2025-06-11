@@ -9,7 +9,6 @@ class SymbolAnalyzer:
         self.function_map: Dict[int, FunctionEntry] = {} 
 
     def _tag_function(self, func_name: str, address: int, func_type: str):
-        # Initialize function entry if it doesn't exist
         if address not in self.function_map:
             self.function_map[address] = {
                 'name': func_name,

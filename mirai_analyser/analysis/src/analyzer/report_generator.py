@@ -25,32 +25,26 @@ class ReportGenerator:
         try:
             print(f"[*] Starting full analysis for: {self.file_path}")
 
-            # --- 1. ELF Parsing ---
             print("  - Running ELF Parser...")
             self.elf_info = self.elf_parser.parse()
             if self.elf_info:
                 full_report_content.append(self.elf_parser.get_report())
             else:
                 full_report_content.append("\n[ERROR] ELF Parsing failed. Cannot generate full report.\n")
-                return # Exit if basic parsing fails
+                return
 
-            # --- 2. Symbol Analysis ---
             print("  - Running Symbol Analyzer...")
-            self.symbol_analyzer = SymbolAnalyzer(self.elf_info) # Initialize with parsed ELFInfo
-            
-            # First, analyze the symbols to populate the function_map
+            self.symbol_analyzer = SymbolAnalyzer(self.elf_info) 
             self.symbol_analyzer.analyze_symbols() 
-            
-            # Then, get the formatted report string from the analyzer
             full_report_content.append(self.symbol_analyzer.get_report())
             
-             # --- 3. String Analysis ---
             print("  - Running String Analyzer...")
             self.string_analyzer = StringAnalyzer(self.elf_info) # Initialize StringAnalyzer
             self.string_analyzer.analyze_strings() # Run the analysis
-            full_report_content.append(self.string_analyzer.get_report()) # Get and append the report
-
-             # --- 4. Code Analysis (Disassembly, Functions, CFG, Call Graph) ---
+            string_report_lines = self.string_analyzer.get_report()
+            full_report_content.append("\n".join(string_report_lines))
+            
+            
             print("  - Running Code Analyzer (Disassembly, Functions, CFG, Call Graph)...")
             self.code_analyzer = CodeAnalyzer(self.elf_info)
             symbol_analysis_result = self.symbol_analyzer.get_analysis_result() 
@@ -58,7 +52,6 @@ class ReportGenerator:
                 self.code_analyzer.find_functions(symbol_analysis_result) 
                 self.code_analyzer.build_control_flow_graphs()
                 
-                # Append the text report for code analysis
                 full_report_content.append(self.code_analyzer.get_report())
 
                 if generate_visualizations:
@@ -72,13 +65,12 @@ class ReportGenerator:
             else:
                 full_report_content.append("\n[ERROR] Code Analysis failed (disassembly error).\n")
             report_path = os.path.join(text_report_output_dir,output_file)
-            # --- Save the Text Report ---
+           
             with open(report_path, 'w') as f:
                 f.write("\n".join(full_report_content))
             
             print(f"[*] Full analysis report saved to: {output_file}")
 
-            # Optionally, add a note about visualizations in the text report
             if generated_viz_files:
                 with open(output_file, 'a') as f: # Append to existing report
                     f.write(f"\n\n--- Visualizations Generated ---\n")
@@ -91,6 +83,6 @@ class ReportGenerator:
         except Exception as e:
             print(f"[CRITICAL ERROR] An error occurred during report generation: {e}")
             import traceback
-            traceback.print_exc() # Print full traceback for debugging
+            traceback.print_exc()
         finally:
             self.elf_parser.close()
