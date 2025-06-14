@@ -1,4 +1,3 @@
-# elf_parser.py
 from elftools.elf.elffile import ELFFile
 from elftools.elf.sections import SymbolTableSection
 import re
@@ -29,7 +28,6 @@ class ELFParser:
     def parse(self) -> Optional[ELFInfo]:
         """parse the ELF file and populate ELFInfo."""
         try:
-            # Open the file and store the handle. DO NOT use 'with' here.
             self._file_handle = open(self.file_path, 'rb')
             self.elffile = ELFFile(self._file_handle)
 
@@ -76,17 +74,12 @@ class ELFParser:
         except FileNotFoundError:
             raise FileNotFoundError(f"[ELFParser] File not found: '{self.file_path}'")
         except Exception as e:
-            # If an error occurs during parsing, attempt to close the file
             if self._file_handle:
                 self._file_handle.close()
                 self._file_handle = None
             raise IOError(f"[ELFParser] Failed to parse ELF file '{self.file_path}': {e}")
         
     def get_report(self) -> str:
-        """
-        Generates a formatted string report of the parsed ELF information.
-        This method assumes parse() has already been called successfully.
-        """
         report_lines = []
         report_lines.append("="*80)
         report_lines.append(f"ELF ANALYSIS REPORT: {os.path.basename(self.file_path)}")
@@ -142,15 +135,13 @@ class ELFParser:
 
         return "\n".join(report_lines)
 
-    # Add a method to explicitly close the file handle
     def close(self):
         if self._file_handle:
             self._file_handle.close()
             self._file_handle = None
-        self.elffile = None # Also clear the elftools object reference
+        self.elffile = None
 
 
-# --- Helper Functions ---
 
 def extract_ascii_strings(data, min_length=4):
     """Extract readable ASCII strings from binary data."""

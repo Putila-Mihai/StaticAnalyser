@@ -10,7 +10,6 @@ BASE_DIR = "./"
 ZIP_DIR = os.path.join(BASE_DIR, "zips")
 TAGS_DIRS = ["normal", "packed", "stripped", "unpacked", "gafgyt", "other"]
 
-# Create necessary directories if they don't exist
 os.makedirs(ZIP_DIR, exist_ok=True)
 for tag_dir in TAGS_DIRS:
     os.makedirs(os.path.join(BASE_DIR, tag_dir), exist_ok=True)
@@ -41,14 +40,13 @@ if data.get("query_status") != "ok":
     print("Query failed:", data.get("query_status"))
     exit(1)
 
-# Step 2: Download, unzip with 7z, sort ELF samples
 for sample in data["data"]:
     sha256_hash = sample["sha256_hash"]
     file_type = sample.get("file_type", "").lower()
     tags = [t.lower() for t in sample.get("tags", [])]
 
     if "elf" not in file_type:
-        continue  # Only want ELF binaries
+        continue
 
     print(f"\nDownloading: {sha256_hash}")
 
@@ -66,14 +64,12 @@ for sample in data["data"]:
     with open(zip_path, "wb") as f:
         f.write(download_response.content)
 
-    # Extract ZIP
     extract_dir = os.path.join(ZIP_DIR, sha256_hash)
     os.makedirs(extract_dir, exist_ok=True)
 
     if not run_7z_extract(zip_path, extract_dir):
         continue
 
-    # Move ELF files to appropriate folders
     for filename in os.listdir(extract_dir):
         src_file = os.path.join(extract_dir, filename)
         if not os.path.isfile(src_file):
@@ -96,6 +92,5 @@ for sample in data["data"]:
         shutil.move(src_file, dest_file)
         print(f"Saved: {dest_file}")
 
-    # Clean up extracted dir if desired
     shutil.rmtree(extract_dir)
     time.sleep(2)

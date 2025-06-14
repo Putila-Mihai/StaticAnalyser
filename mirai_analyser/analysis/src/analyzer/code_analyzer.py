@@ -6,11 +6,9 @@ from capstone import Cs, CS_ARCH_ARM, CS_ARCH_MIPS, \
 
 from typing import List, Dict, Any, Optional, Set
 
-# Assuming ELFInfo is imported from your elf_parser.py
 from elf_parser import ELFInfo
-from config import PROLOGUE_PATTERNS # Only import what's used, not *
+from config import PROLOGUE_PATTERNS 
 
-# --- New BasicBlock Class ---
 class BasicBlock:
     def __init__(self, start_address: int):
         self.start_address: int = start_address
@@ -25,7 +23,7 @@ class BasicBlock:
 
     def add_instruction(self, insn: CsInsn):
         self.instructions.append(insn)
-        self.end_address = insn.address # Update end_address with each added instruction's address
+        self.end_address = insn.address
 
     def __repr__(self):
         start = hex(self.start_address)
@@ -33,20 +31,18 @@ class BasicBlock:
         num_insns = len(self.instructions)
         return f"BB(0x{start[2:]}-0x{end[2:]}, {num_insns} insns, succ={len(self.successors)})"
 
-# --- Updated Function Class ---
 class Function:
     def __init__(self, start_address: int, name: Optional[str] = None, func_type: str = 'unknown'):
         self.start_address = start_address
         self.name = name if name else f"sub_{hex(start_address)}"
         self.func_type = func_type # e.g., 'local', 'imported', 'discovered_call', 'discovered_prologue'
-        self.end_address: Optional[int] = None # Will be determined later, or conservatively estimated (last instruction in function)
+        self.end_address: Optional[int] = None
         self.instructions: List[CsInsn] = [] # All instructions strictly belonging to this function
-        self.called_functions: Set[int] = set() # Addresses of functions called by this one (used for call graph)
-        self.xrefs_from: Set[int] = set() # Addresses that reference (call/jump to) this function. Contains calling function addresses.
-        self.basic_blocks: Dict[int, BasicBlock] = {} # Map BB start_addr to BasicBlock object
+        self.called_functions: Set[int] = set() # Addresses of functions called by this one (call graph)
+        self.xrefs_from: Set[int] = set() # Addresses that reference (call/jump to) this function.
+        self.basic_blocks: Dict[int, BasicBlock] = {} # Map of BBs (start_addr as key)
         self.entry_block_address: Optional[int] = None # The start_address of the function's entry block
-        self.score: float = 0.0 # For heuristics later
-        self.tags: List[str] = [] # Tags from SymbolAnalyzer or other heuristics
+        self.tags: List[str] = []
 
     def __repr__(self):
         return f"Function(0x{self.start_address:x}, {self.name}, {self.func_type}, {len(self.basic_blocks)} BBs)"
@@ -55,8 +51,8 @@ class Function:
 class CodeAnalyzer:
     def __init__(self, elf_info: ELFInfo):
         self.elf_info = elf_info
-        self.md = None  # Capstone disassembler engine
-        self.instructions: List[CsInsn] = [] # List to store ALL disassembled instructions linearly
+        self.md = None  # Capstone engine
+        self.instructions: List[CsInsn] = [] # List to store all disassembled instructions linearly
         self.addr_to_idx: Dict[int, int] = {} # Map instruction address to its index in self.instructions
         self.functions: Dict[int, Function] = {} # Map function start_addr to Function object
         self.text_section_data_info = None
@@ -71,11 +67,9 @@ class CodeAnalyzer:
         if arch == 'ARM':
             cs_arch = CS_ARCH_ARM
             if self.elf_info.entry_point is not None and self.elf_info.entry_point % 2 != 0:
-                 cs_mode |= CS_MODE_THUMB # Set Thumb mode
-                 # print("Info: Entry point is odd, setting Capstone to Thumb mode for ARM.")
+                 cs_mode |= CS_MODE_THUMB
             else:
-                 cs_mode |= CS_MODE_ARM # Set ARM mode (default for even entry points)
-                 # print("Info: Entry point is even, setting Capstone to ARM mode (not Thumb).")
+                 cs_mode |= CS_MODE_ARM
 
         elif arch == 'MIPS':
             cs_arch = CS_ARCH_MIPS
@@ -94,9 +88,6 @@ class CodeAnalyzer:
             return False
 
     def disassemble_code(self) -> bool:
-        """
-        Disassembles the raw bytes of the .text section and populates self.instructions.
-        """
         for section in self.elf_info.sections:
             if section['name'] == '.text':
                 self.text_section_data_info = section
@@ -116,7 +107,6 @@ class CodeAnalyzer:
             print("Warning: .text section data is empty.")
             return False
 
-        # print(f"Disassembling {len(text_data)} bytes from {self.elf_info.machine_arch} at VAddr {hex(text_vaddr)}...")
         try:
             for i, insn in enumerate(self.md.disasm(text_data, text_vaddr)):
                 self.instructions.append(insn)
@@ -131,12 +121,12 @@ class CodeAnalyzer:
         if not self.instructions:
             print("Warning: No disassembled instructions. Cannot find functions.")
             return
-        # 1. Always add the ELF entry point
+        
         if self.elf_info.entry_point is not None:
             entry_point_addr = self.elf_info.entry_point
-            # Adjust entry point for Thumb mode if applicable
+            
             if self.elf_info.machine_arch == 'ARM' and (entry_point_addr % 2 != 0):
-                entry_point_addr -= 1 # Capstone expects even addresses for ARM modes
+                entry_point_addr -= 1 
             
             entry_name = 'ELF_Entry'
             entry_type = 'local' 
@@ -152,30 +142,28 @@ class CodeAnalyzer:
             func = Function(entry_point_addr, name=entry_name, func_type=entry_type)
             func.tags.extend(entry_tags)
             self.functions[entry_point_addr] = func
-            # print(f"Added ELF Entry Point: {func.name} (0x{func.start_address:x})")
+           
 
 
-        # 2. Case: Binary has symbol information (not stripped, or partial symbols)
+        
         if not symbol_analyzer_result.get('is_stripped', True) or symbol_analyzer_result.get('function_map'):
-            # print("Using symbol table information to find functions...")
+            
             self._find_functions_from_symbols(symbol_analyzer_result['function_map'])
         else:
             print("Binary is stripped/no symbols. Relying on code heuristics...")
 
-        # 3. Find functions from call targets (applicable to both stripped and unstripped)
+       
         self._find_functions_from_call_targets()
 
-        # 4. Find functions from common prologues (primarily for stripped binaries)
+        
         if symbol_analyzer_result.get('is_stripped', True):
              self._find_functions_from_prologues()
-
-        # print(f"Finished function identification. Found {len(self.functions)} functions.")
 
     def _find_functions_from_symbols(self, symbol_function_map: Dict[int, Dict[str, Any]]) -> None:
         """Helper to add functions identified by SymbolAnalyzer or update existing ones with symbol info."""
         for addr, sym_details in symbol_function_map.items():
             if addr not in self.functions:
-                # If the function is not yet known, create it directly from symbol info
+               
                 func = Function(
                     start_address=addr,
                     name=sym_details.get('name'),
@@ -184,19 +172,16 @@ class CodeAnalyzer:
                 func.tags.extend(sym_details.get('tags', []))
                 self.functions[addr] = func
             else:
-                # If the function already exists (e.g., discovered as entry point or call target)
+               
                 existing_func = self.functions[addr]
                 
                 sym_name = sym_details.get('name')
                 if sym_name:
-                    # Always prioritize a valid symbol name over generic 'sub_0x...' or 'ELF_Entry'
+                   
                     if existing_func.name.startswith("sub_") or existing_func.name == "ELF_Entry":
                         existing_func.name = sym_name
-                    # Optionally, if the existing name is less descriptive or the type is less authoritative, update it.
-                    # Example: if existing_func.func_type is 'discovered_call' but symbol says 'local'
                     if existing_func.func_type in ['unknown', 'discovered_call', 'discovered_prologue']:
                         existing_func.func_type = sym_details.get('type', 'symbol')
-                    # If an imported function later gets a more specific local symbol (less common but possible)
                     elif existing_func.func_type == 'imported' and sym_details.get('type') == 'local':
                         existing_func.func_type = sym_details['type']
 
@@ -205,7 +190,6 @@ class CodeAnalyzer:
 
 
     def _find_functions_from_call_targets(self) -> None:
-        """Helper to find function entry points from direct call targets."""
         for insn in self.instructions:
             if (insn.group(CS_GRP_CALL) and not insn.group(CS_GRP_JUMP)) or \
                (self.elf_info.machine_arch == 'ARM' and insn.mnemonic.startswith('bl')) or \
@@ -213,13 +197,13 @@ class CodeAnalyzer:
                 
                 target_addr = None
                 for op in insn.operands:
-                    if op.type == CS_OP_IMM: # Using CS_OP_IMM constant
+                    if op.type == CS_OP_IMM: 
                         target_addr = op.value.imm
                         break
                 
                 if target_addr is not None:
                     if self.elf_info.machine_arch == 'ARM' and (target_addr % 2 != 0):
-                        target_addr -= 1 # Strip Thumb bit for function start
+                        target_addr -= 1 
 
                     is_in_text_section = False
                     if self.text_section_data_info:
@@ -231,11 +215,7 @@ class CodeAnalyzer:
                     if is_in_text_section and target_addr not in self.functions:
                         func = Function(target_addr, func_type='discovered_call')
                         self.functions[target_addr] = func
-                        # print(f"  Added call target function: 0x{target_addr:x}")
-                        # Also add a cross-reference to the called function
-                        # self.functions[target_addr].xrefs_from.add(insn.address) # This will be handled in CFG build
-                        # (Requires determining which function 'insn' belongs to, will do later during basic block parsing)
-
+                
     def _find_functions_from_prologues(self) -> None:
 
         current_arch_prologues = []
@@ -243,7 +223,6 @@ class CodeAnalyzer:
         if self.elf_info.machine_arch in PROLOGUE_PATTERNS:
             current_arch_prologues = PROLOGUE_PATTERNS[self.elf_info.machine_arch]
         else:
-            # print(f"Info: No specific prologue patterns defined for {self.elf_info.machine_arch}.")
             return
 
         for i, insn in enumerate(self.instructions):
@@ -284,7 +263,6 @@ class CodeAnalyzer:
 
                     func = Function(insn.address, func_type='discovered_prologue')
                     self.functions[insn.address] = func
-                    # print(f"  Added prologue-based function: 0x{insn.address:x} ({self.elf_info.machine_arch})")
                     break # Break from pattern loop, found a function, move to next instruction
 
     def build_control_flow_graphs(self) -> None:
@@ -293,7 +271,6 @@ class CodeAnalyzer:
             print("Warning: No functions identified. Cannot build CFGs.")
             return
 
-        # print("\n--- Building Control Flow Graphs ---")
         sorted_function_addrs = sorted(self.functions.keys())
         
         # Calculate approximate function end addresses (for instruction assignment)
@@ -321,47 +298,35 @@ class CodeAnalyzer:
         # Assign instructions to functions and build basic blocks
         for func_addr in sorted_function_addrs:
             func = self.functions[func_addr]
-            func_end_addr_limit = function_boundaries[func_addr] # The highest address an instruction for this function can have
+            func_end_addr_limit = function_boundaries[func_addr]
 
-            # If function start address is not found in instructions, skip
             if func.start_address not in self.addr_to_idx:
-                # print(f"Warning: Function 0x{func.start_address:x} not found in disassembled instructions map. Skipping CFG for this function.")
                 continue
 
             bb_leaders = set()
             bb_leaders.add(func.start_address) # Function start is always a BB leader
 
             start_idx_global = self.addr_to_idx[func.start_address]
-            func.instructions = [] # Clear previous instructions to repopulate accurately
+            func.instructions = [] 
 
-            # Iterate through instructions starting from the function's start address
-            # and within its estimated bounds
             for i in range(start_idx_global, len(self.instructions)):
                 insn = self.instructions[i]
 
-                # Stop if we've gone past the function's estimated end address
-                # or if we hit the start of another identified function
+               
                 if insn.address > func_end_addr_limit or \
                    (insn.address != func.start_address and insn.address in self.functions):
                     break 
 
-                func.instructions.append(insn) # Add instruction to function's instruction list
-
-                # Identify potential basic block boundaries
-                # A basic block ends if the current instruction is a control flow instruction
-                # and the instruction *after* it starts a new block.
-                # The target of a jump/call is also a new block.
-                
+                func.instructions.append(insn) 
+               
                 is_terminator = False
                 
                 if insn.group(CS_GRP_CALL):
                     is_terminator = True
-                    # Fall-through address (instruction immediately after call) is a new BB leader
                     fall_through_addr = insn.address + insn.size
                     if fall_through_addr <= func_end_addr_limit: # Ensure fall-through is within function bounds
                         bb_leaders.add(fall_through_addr)
                     
-                    # Extract call target and add to called_functions set for call graph
                     for op in insn.operands:
                         if op.type == CS_OP_IMM:
                             call_target = op.value.imm
@@ -369,7 +334,6 @@ class CodeAnalyzer:
                                 call_target -= 1 # Strip Thumb bit if necessary
                             func.called_functions.add(call_target)
                             
-                            # Populate xrefs_from for the CALLED function (inter-procedural link)
                             if call_target in self.functions:
                                 self.functions[call_target].xrefs_from.add(func.start_address) # ADDED THIS LINE
                             break
@@ -377,22 +341,19 @@ class CodeAnalyzer:
                 elif insn.group(CS_GRP_JUMP):
                     is_terminator = True
                     
-                    # Extract jump target(s)
                     jump_targets = set()
                     for op in insn.operands:
                         if op.type == CS_OP_IMM:
                             target = op.value.imm
                             if self.elf_info.machine_arch == 'ARM' and (target % 2 != 0):
-                                target -= 1 # Strip Thumb bit if necessary
+                                target -= 1 
                             jump_targets.add(target)
-                            break # Assume one immediate target for direct jumps
+                            break
                     
-                    # Add all direct jump targets as leaders if they are within function bounds
                     for target_addr in jump_targets:
                         if func.start_address <= target_addr <= func_end_addr_limit:
                             bb_leaders.add(target_addr)
                             # Consider jump targets also as potential xrefs_from if they land in another function
-                            # However, for CFG, we track within-function jumps. Cross-function jumps are effectively calls/returns.
                             # For pure XREFS, we track calls and explicit jumps to function entries.
                             if target_addr in self.functions and target_addr != func.start_address:
                                 self.functions[target_addr].xrefs_from.add(func.start_address)
@@ -406,7 +367,7 @@ class CodeAnalyzer:
                         if fall_through_addr <= func_end_addr_limit:
                             bb_leaders.add(fall_through_addr)
                     # If it's an indirect jump (no immediate operand), its fall-through is still a new block
-                    elif not jump_targets and not insn.group(CS_GRP_RET): # Not a direct jump and not a return
+                    elif not jump_targets and not insn.group(CS_GRP_RET): 
                         fall_through_addr = insn.address + insn.size
                         if fall_through_addr <= func_end_addr_limit:
                             bb_leaders.add(fall_through_addr)
@@ -430,24 +391,18 @@ class CodeAnalyzer:
             else:
                 func.end_address = func.start_address # No instructions found for function
 
-            # 2. Create BasicBlock objects and assign instructions
             sorted_bb_leaders = sorted(list(bb_leaders))
             
-            # Filter leaders to only those truly within the determined function bounds
             valid_bb_leaders = [
                 addr for addr in sorted_bb_leaders
                 if func.start_address <= addr <= func.end_address
             ]
             
             if not valid_bb_leaders:
-                # This could happen for very small functions or if range calculation was off
-                # print(f"Warning: No valid basic block leaders found for function 0x{func.start_address:x} within its bounds.")
                 continue
 
-            # Iterate through leaders to define basic blocks
             for k, leader_addr in enumerate(valid_bb_leaders):
                 if leader_addr not in self.addr_to_idx:
-                    # print(f"Error: Leader address 0x{leader_addr:x} not in global instructions map. Skipping BB creation.")
                     continue
 
                 bb = BasicBlock(leader_addr)
@@ -457,7 +412,7 @@ class CodeAnalyzer:
                 
                 # Determine where this basic block ends
                 # It ends either at the instruction before the next leader, or the end of the function's instructions.
-                bb_end_idx_global = len(self.instructions) - 1 # Default to end of all instructions
+                bb_end_idx_global = len(self.instructions) - 1 
 
                 if k + 1 < len(valid_bb_leaders):
                     next_leader_addr = valid_bb_leaders[k+1]
@@ -468,7 +423,6 @@ class CodeAnalyzer:
                 func_last_insn_idx_global = self.addr_to_idx[func.instructions[-1].address] if func.instructions else -1
                 bb_end_idx_global = min(bb_end_idx_global, func_last_insn_idx_global)
                 
-                # Add instructions to the basic block
                 for insn_idx in range(current_insn_idx, bb_end_idx_global + 1):
                     if insn_idx >= len(self.instructions): break # Bounds check
                     insn_to_add = self.instructions[insn_idx]
@@ -478,12 +432,11 @@ class CodeAnalyzer:
                     if insn_to_add.address > func.end_address:
                         break
                     if insn_to_add.address != leader_addr and insn_to_add.address in self.functions:
-                        break # If it's a new function's start, this block ends here
+                        break
 
                     bb.add_instruction(insn_to_add)
 
                 if not bb.instructions:
-                    # print(f"Warning: Basic Block at 0x{bb.start_address:x} in function 0x{func.start_address:x} has no instructions after assignment. Skipping.")
                     continue
 
                 # Determine terminator type for the block
@@ -501,7 +454,7 @@ class CodeAnalyzer:
                 
                 # If the block is the last instruction in the function and didn't terminate explicitly
                 if bb.end_address == func.end_address and bb.terminator_type == 'fall_through':
-                    bb.is_exit_block = True # Implicit exit block
+                    bb.is_exit_block = True 
 
 
                 func.basic_blocks[bb.start_address] = bb
@@ -510,21 +463,20 @@ class CodeAnalyzer:
                     bb.is_entry_block = True
                     func.entry_block_address = bb.start_address
                 
-            # 3. Determine Control Flow Edges (Successors and Predecessors)
+            #Determine Control Flow Edges (Successors and Predecessors)
             for bb_addr, bb in func.basic_blocks.items():
-                if not bb.instructions: continue # Skip if no instructions for some reason
+                if not bb.instructions: continue 
 
                 terminator_insn = bb.instructions[-1]
                 
-                # If it's a return instruction, it's an exit block with no intra-procedural successors
                 if bb.terminator_type == 'ret':
                     bb.is_exit_block = True
-                    continue # No successors for a return
+                    continue 
 
                 # Calculate fall-through address
                 fall_through_addr = terminator_insn.address + terminator_insn.size
                 
-                # Get direct jump/call targets (if any)
+                # Get direct jump/call targets
                 jump_targets = set()
                 if terminator_insn.group(CS_GRP_JUMP) or terminator_insn.group(CS_GRP_CALL):
                     for op in terminator_insn.operands:
@@ -543,18 +495,18 @@ class CodeAnalyzer:
                             bb.successors.add(target_addr)
                             func.basic_blocks[target_addr].predecessors.add(bb_addr)
                         # else: jump is outside this function or to an unknown address (treat as exit)
-                    if not bb.successors: # If no valid internal successor, it's an exit
+                    if not bb.successors:
                         bb.is_exit_block = True
 
                 elif bb.terminator_type == 'jump_conditional':
-                    # Path 1: Jump target
+                    # Jump target
                     if jump_targets:
                         target_addr = list(jump_targets)[0]
                         if target_addr in func.basic_blocks:
                             bb.successors.add(target_addr)
                             func.basic_blocks[target_addr].predecessors.add(bb_addr)
                     
-                    # Path 2: Fall-through
+                    # Fall-through
                     if fall_through_addr in func.basic_blocks:
                         bb.successors.add(fall_through_addr)
                         func.basic_blocks[fall_through_addr].predecessors.add(bb_addr)
@@ -568,7 +520,7 @@ class CodeAnalyzer:
                         func.basic_blocks[fall_through_addr].predecessors.add(bb_addr)
                     # If call is the last instruction of the function (tail call or exit)
                     elif bb.end_address == func.end_address:
-                         bb.is_exit_block = True # Consider it an exit if no fall-through within func
+                         bb.is_exit_block = True
 
                 elif bb.terminator_type == 'fall_through':
                     # Successor is simply the next basic block in linear memory order
@@ -578,29 +530,19 @@ class CodeAnalyzer:
                     else: # If falls off the end of the current function's defined instructions
                         bb.is_exit_block = True # Implicit exit block
 
-            # print(f"  CFG built for function {func.name} (0x{func.start_address:x}): {len(func.basic_blocks)} basic blocks.")
-
-    # --- New get_report method for text summary ---
     def get_report(self) -> str:
-        """
-        Generates a formatted string report of the code analysis,
-        including disassembly info, identified functions, and call graph summary.
-        Assumes disassemble_code(), find_functions(), and build_control_flow_graphs()
-        have already been called successfully.
-        """
+    
         report_lines = []
         report_lines.append("="*80)
         report_lines.append("CODE ANALYSIS REPORT")
         report_lines.append("="*80)
 
-        # --- Disassembly Summary ---
         report_lines.append("\n--- Disassembly Summary ---")
         if self.text_section_data_info:
             report_lines.append(f"  .text Section VAddr: 0x{self.text_section_data_info['addr']:x}")
             report_lines.append(f"  .text Section Size:  0x{self.text_section_data_info['size']:x} bytes")
         report_lines.append(f"  Total Disassembled Instructions: {len(self.instructions)}")
 
-        # --- Function Summary ---
         report_lines.append("\n--- Function Summary ---")
         report_lines.append(f"  Total Functions Identified: {len(self.functions)}")
         
@@ -612,7 +554,6 @@ class CodeAnalyzer:
         for func_type, count in sorted(func_types_count.items()):
             report_lines.append(f"    - {func_type.replace('_', ' ').title()}: {count}")
 
-        # --- Detailed Function List (Condensed) ---
         report_lines.append("\n--- Detailed Function List ---")
         if not self.functions:
             report_lines.append("  No functions to display.")
@@ -628,24 +569,23 @@ class CodeAnalyzer:
                     f"{len(func.basic_blocks):<5} {len(func.called_functions):<6} {len(func.xrefs_from):<6}"
                 )
 
-        # --- Inter-procedural Call Graph Summary ---
         report_lines.append("\n--- Call Graph Summary ---")
         functions_with_calls = sorted([f for f in self.functions.values() if f.called_functions], key=lambda f: len(f.called_functions), reverse=True)
         functions_with_xrefs = sorted([f for f in self.functions.values() if f.xrefs_from], key=lambda f: len(f.xrefs_from), reverse=True)
 
         if functions_with_calls:
-            report_lines.append("  Top 5 Functions Making Calls:")
+            report_lines.append(" Top 5 Functions Making Calls:")
             for i, func in enumerate(functions_with_calls[:5]):
                 report_lines.append(f"    {i+1}. {func.name} (0x{func.start_address:x}) calls {len(func.called_functions)} others.")
         else:
-            report_lines.append("  No functions observed making calls.")
+            report_lines.append(" No functions observed making calls.")
 
         if functions_with_xrefs:
-            report_lines.append("  Top 5 Functions Being Called/Referenced:")
+            report_lines.append(" Top 5 Functions Being Called/Referenced:")
             for i, func in enumerate(functions_with_xrefs[:5]):
                 report_lines.append(f"    {i+1}. {func.name} (0x{func.start_address:x}) has {len(func.xrefs_from)} cross-references.")
         else:
-            report_lines.append("  No functions observed being called/referenced.")
+            report_lines.append(" No functions observed being called/referenced.")
 
         report_lines.append("\n" + "="*80)
         return "\n".join(report_lines)
@@ -657,7 +597,7 @@ class CodeAnalyzer:
                             cfg_filter_entry_point: bool = True,
                             cfg_filter_min_xrefs: int = 5, # Generate CFG for functions with >= 5 xrefs
                             cfg_filter_min_calls_made: int = 5, # Generate CFG for functions calling >= 5 others
-                            cfg_max_count: int = 15 # Max number of CFGs to generate if filters result in many
+                            cfg_max_count: int = 15 # Max number of CFGs to generate if there are to many results
                             ) -> List[str]:
         if not self.functions:
             print("Warning: No functions identified. Skipping visualization generation.")
@@ -670,12 +610,10 @@ class CodeAnalyzer:
         
         print(f"[*] Generating visualizations to '{output_dir}'...")
 
-        # 1. Generate Global Call Graph (always generate this one)
         print("  - Generating Global Call Graph...")
         call_graph = graphviz.Digraph(comment='Global Call Graph', format='png')
-        call_graph.attr(rankdir='LR', size='15,15') # Left-to-Right
+        call_graph.attr(rankdir='LR', size='15,15')
 
-        # Nodes for functions
         for func_addr, func in self.functions.items():
             label = f"{func.name}\n(0x{func.start_address:x})"
             color = 'lightgray'
@@ -691,7 +629,6 @@ class CodeAnalyzer:
 
             call_graph.node(f'Func_{func_addr:x}', label=label, shape='box', style='filled', fillcolor=color)
 
-        # Edges for calls
         for func_addr, func in self.functions.items():
             for called_func_addr in func.called_functions:
                 if called_func_addr in self.functions: 
@@ -706,24 +643,22 @@ class CodeAnalyzer:
         except Exception as e:
             print(f"  Error generating Call Graph: {e}")
 
-        # 2. Generate Individual Function CFGs (based on filters)
         if generate_cfgs:
             print("  - Generating Control Flow Graphs for selected functions...")
             
-            # Identify functions for CFG generation based on criteria
             cfgs_to_generate = set()
 
-            # Criterion 1: Mirai-tagged functions
+            # Mirai-tagged functions
             if cfg_filter_mirai_tags:
                 for func_addr, func in self.functions.items():
                     if any('mirai' in tag.lower() for tag in func.tags): # Check if any tag contains 'mirai'
                         cfgs_to_generate.add(func_addr)
             
-            # Criterion 2: ELF Entry Point
+            # ELF Entry Point
             if cfg_filter_entry_point and self.elf_info.entry_point in self.functions:
                 cfgs_to_generate.add(self.elf_info.entry_point)
 
-            # Criterion 3 & 4: Functions with many xrefs or calls (prioritize more relevant ones first)
+            # Functions with many xrefs or calls (prioritize more relevant ones first)
             # We'll build a sorted list and add them until max_count is reached
             candidate_funcs = sorted(self.functions.values(), key=lambda f: (len(f.xrefs_from) + len(f.called_functions)), reverse=True)
             
@@ -735,9 +670,8 @@ class CodeAnalyzer:
                     cfgs_to_generate.add(func.start_address)
                 
                 if len(cfgs_to_generate) >= cfg_max_count:
-                    break # Stop adding if we hit the limit
+                    break
 
-            # Now, actually generate the CFGs for the selected functions
             generated_cfg_count = 0
             for func_addr in cfgs_to_generate:
                 if generated_cfg_count >= cfg_max_count:
@@ -746,7 +680,6 @@ class CodeAnalyzer:
 
                 func = self.functions[func_addr]
                 if not func.basic_blocks:
-                    # print(f"    Skipping CFG for {func.name} (0x{func_addr:x}): No basic blocks.")
                     continue
 
                 dot = graphviz.Digraph(comment=f'CFG for {func.name}', format='png')
@@ -780,7 +713,6 @@ class CodeAnalyzer:
                     dot_file = dot.render(output_path_base, view=False, cleanup=True)
                     generated_files.append(dot_file)
                     generated_cfg_count += 1
-                    # print(f"    Generated CFG: {dot_file}")
                 except Exception as e:
                     print(f"    Error generating CFG for {func.name} (0x{func_addr:x}): {e}")
             

@@ -1,7 +1,7 @@
 from elftools.elf.sections import SymbolTableSection
 from typing import List, Dict, Any, Optional
 from config import SYMBOL_MIRAI_KEYWORDS
-FunctionEntry = Dict[str, Any] # {'name': str, 'address': int, 'type': str, 'tags': List[str]}
+FunctionEntry = Dict[str, Any]
 
 class SymbolAnalyzer:
     def __init__(self, elf_info: Any):
@@ -20,14 +20,12 @@ class SymbolAnalyzer:
             if self.function_map[address]['name'] != func_name:
                  pass
             
-            # Refine function type: if the current type is 'unknown' or less specific, update it
-            # This logic can be adjusted based on desired type precedence
             current_type = self.function_map[address]['type']
             if func_type != 'unknown' and (current_type == 'unknown' or (current_type == 'imported' and func_type == 'local')):
-                # Prioritize local over imported if both are found for the same address
+               
                 self.function_map[address]['type'] = func_type
             elif func_type != 'unknown' and func_type != current_type and current_type != 'local':
-                 # Allow updates if new type is different and not 'unknown', and current isn't 'local'
+                 
                  self.function_map[address]['type'] = func_type
 
         current_tags = self.function_map[address]['tags']
@@ -84,7 +82,7 @@ class SymbolAnalyzer:
                     if address != 0:
                         if name in imported_func_names:
                             self._tag_function(name, address, 'imported')
-                        else: # This is likely a local function defined within this ELF
+                        else: 
                             self._tag_function(name, address, 'local')
 
                 elif sym_type == 'STT_OBJECT' and address != 0:
@@ -96,7 +94,6 @@ class SymbolAnalyzer:
             'is_stripped': self.elf_info.is_stripped,
             'imported_functions': sorted([f['name'] for f in self.function_map.values() if f['type'] == 'imported']),
             'local_functions': sorted([f['name'] for f in self.function_map.values() if f['type'] == 'local']),
-            # Define what constitutes "dangerous" based on your mirai_keywords categories
             'dangerous_functions': sorted(list(set([
                 f['name'] for f in self.function_map.values() 
                 if any(tag in f['tags'] for tag in ['system', 'attack', 'evasion', 'persistence'])
@@ -105,16 +102,12 @@ class SymbolAnalyzer:
         return result
 
     def get_report(self) -> str:
-        """
-        Generates a formatted string report of the symbol analysis.
-        Assumes analyze_symbols() has already been called successfully.
-        """
         report_lines = []
         report_lines.append("="*80)
         report_lines.append("SYMBOL ANALYSIS REPORT")
         report_lines.append("="*80)
 
-        analysis_result = self.get_analysis_result() # Get the structured results
+        analysis_result = self.get_analysis_result()
 
         report_lines.append(f"\n--- Binary Stripping Status ---")
         report_lines.append(f"  Binary stripped: {'Yes' if analysis_result['is_stripped'] else 'No'}")

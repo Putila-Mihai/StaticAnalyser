@@ -1,27 +1,14 @@
-# Constants for StringAnalyzer
-# GENERAL STRING FILTERING
-MIN_STRING_LENGTH = 7 # Increased from 5. Strings shorter than 7 are often noise or too generic.
-MAX_STRING_LENGTH_PLAIN = 128 # Reduced from 256. Very long plain strings are rare for direct C2/commands.
-MAX_XOR_SCAN_LENGTH = 256 # Reduced from 512. Most XORed strings in malware are not excessively long.
-
-# CHARACTER PLAUSIBILITY RATIOS & LIMITS
-MIN_ALPHA_NUM_RATIO = 0.65  # Increased from 0.5. At least 65% alphanumeric for plain strings.
-MIN_ALPHA_NUM_RATIO_XOR_PLAUSIBLE = 0.80 # Increased from 0.65. Very strict for XOR. Decrypted output should look like text.
-MAX_REPETITION_RATIO = 0.25 # Reduced from 0.35. No single char should repeat more than 25% of the string (e.g., 'AAAAABBCDE' = 5/10=0.5, too high).
-MAX_CONSECUTIVE_NON_ALNUM = 2 # Reduced from 3. Max 2 consecutive non-alphanumeric chars. (e.g., "ab-cd_ef" is okay, "ab___cd" is not).
-
-# ENTROPY-BASED DETECTION
-SUSPICIOUS_ENTROPY_THRESHOLD = 6.0 # Increased from 5.0. Higher threshold means more truly "random-looking" data.
-MIN_ENTROPY_BLOB_LENGTH = 32 # Increased from 16. Smaller high-entropy blobs are more likely random padding/noise.
-
-# SCORING THRESHOLDS (This is where the final reporting decision is made)
-MIN_REPORT_SCORE_THRESHOLD = 1.0 # Increased from 0.8. Only strings with strong indicators pass.
-
-# XOR KEYS (Keep your expanded set, but ensure it's a set/tuple for efficiency if iterated frequently)
-XOR_KEYS = (0x37, 0x13, 0x55, 0xFF, 0x01, 0x29, 0x42) # Using a tuple is slightly more efficient than list if not modified.
-
-# MIRAI KEYWORDS (Consolidate and refine - make them lowercase)
-# Prioritize truly indicative keywords. Avoid overly generic ones.
+MIN_STRING_LENGTH = 7
+MAX_STRING_LENGTH_PLAIN = 128
+MAX_XOR_SCAN_LENGTH = 256
+MIN_ALPHA_NUM_RATIO = 0.65
+MIN_ALPHA_NUM_RATIO_XOR_PLAUSIBLE = 0.80
+MAX_REPETITION_RATIO = 0.25
+MAX_CONSECUTIVE_NON_ALNUM = 2
+SUSPICIOUS_ENTROPY_THRESHOLD = 6.0
+MIN_ENTROPY_BLOB_LENGTH = 32
+MIN_REPORT_SCORE_THRESHOLD = 1.0
+XOR_KEYS = (0x37, 0x13, 0x55, 0xFF, 0x01, 0x29, 0x42)
 MIRAI_KEYWORDS = {
     # Core functionality & DDoS types (highly indicative)
     "mirai", "botnet", "jihad", "okiru", "satori", "gafgyt", # Specific botnet names
@@ -31,7 +18,7 @@ MIRAI_KEYWORDS = {
     "scanner_init", "scanner_kill", "brute_telnet", "brute_ssh", "brute_http",
     "report_working", "table_unlock", # Related to scanner/config
     "random_ip", "set_id", # Bot IDs
-
+    
     # Common C2 & Network-related (still specific)
     "socket", "connect", "send", "recv", "sendto", "recvfrom", "bind",
     "gethostbyname", "getaddrinfo", "inet_addr", "htons", "ntohs",
@@ -58,9 +45,6 @@ MIRAI_KEYWORDS = {
     "anonymous:anonymous", # FTP/TFTP defaults
     "default", "123456", "password", "support" # Generic common passwords
 }
-
-# FUZZY PATTERNS (Use raw strings for regex to avoid backslash issues)
-# These are for slightly distorted or partial matches.
 FUZZY_PATTERNS = [
     r'm[i1!l]r[a4]i',       # mirai, m1rai, m!rai, m1ra4i
     r'sc[a4]nn?er',         # scaner, scanner, sc4ner
@@ -73,9 +57,6 @@ FUZZY_PATTERNS = [
     r'wget\s+-O\s+',      # `wget -O` to download and save
     r'tftp\s+-g\s+-r',    # `tftp -g -r` to get a file
 ]
-
-# STRUCTURAL CHECKS (More specific, often full string patterns)
-# These should be very strong indicators, potentially leading to a higher score.
 STRUCTURAL_CHECKS = [
     r'/etc/rc.local', # Full path for persistence
     r'/dev/(null|zero|urandom)', # Common device files
@@ -92,10 +73,8 @@ STRUCTURAL_CHECKS = [
     r'telnet\s+\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', # telnet command
     r'ssh\s+[a-zA-Z0-9@.-]+\s+-p\s+\d+', # ssh command with port
     r'icmp\s+echo\s+request', # ICMP messages
-    r'Mirai', 'MIRAI', # Direct "Mirai" string (case sensitive check in _is_mirai_string then)
 ]
 
-# Function Prologue Patterns (These seem okay as they are, but good to keep in mind for code analysis)
 PROLOGUE_PATTERNS = {
     'ARM': [
         (['push', 'sub'], ['lr', 'sp']),
