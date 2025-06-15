@@ -46,6 +46,7 @@ need to use **volume mounts (`-v`)** to make your local sample files accessible 
 ```bash
 docker run \
   -v /home/user/my_samples:/app/input_data \
+  -v /home/user/output:/app/output_data \
   mirai-elf-analyzer \
   -f /app/input_data/malware.elf \
   -o /app/output_data/single_file_results
