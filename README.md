@@ -1,11 +1,8 @@
 
-This is a lightweight, automated tool designed for static analysis of **ELF binaries**.
+Thi sis a lightweight, automated tool designed for static analysis of **ELF binaries**.
 
----
 
-## ✨ Features
-
-This analyzer offers a comprehensive overview of ELF binary structure and content, including:
+Mini analyzer that offers a brief overview of ELF binary structure and content, including:
 
 * **ELF Structure Analysis:** parsing of the ELF header, sections, and segments.
 * **Symbol Extraction:** Identification and listing of function and data symbols(if ELF is not stripped)
@@ -61,7 +58,7 @@ if help needed
 
 available scripts to download samples from malware bazaar, unpack elfs.
 
-## 🚧 Limitations & Future Work
+## Limitations & Future Work
 
 -The tool is very limited.It supports only ARM and MIPS arhitecture (there are multiple others like X86, PowerPC, etc)
 -The string xor decryptor is based only on a set of popular keys for mirai variants and use only a single XOR operation.This is why it is faulty.
