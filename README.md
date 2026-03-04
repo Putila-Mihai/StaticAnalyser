@@ -1,8 +1,4 @@
-
-Thi sis a lightweight, automated tool designed for static analysis of **ELF binaries**.
-
-
-Mini analyzer that offers a brief overview of ELF binary structure and content, including:
+Light analyzer that offers a brief overview of ELF binary structure and content, including:
 
 * **ELF Structure Analysis:** parsing of the ELF header, sections, and segments.
 * **Symbol Extraction:** Identification and listing of function and data symbols(if ELF is not stripped)
